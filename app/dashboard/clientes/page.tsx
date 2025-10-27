@@ -1,27 +1,19 @@
-import { redirect } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
 import { DashboardLayout } from "@/components/dashboard-layout"
 import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
 import Link from "next/link"
 import { ClientsTable } from "@/components/clients-table"
+import { getUserWithProfile } from "@/lib/get-user-with-profile"
+import { createClient } from "@/lib/supabase/server"
 
 export default async function ClientesPage() {
+  const { user, profile } = await getUserWithProfile()
   const supabase = await createClient()
-
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser()
-
-  if (error || !user) {
-    redirect("/auth/login")
-  }
 
   const { data: clientes } = await supabase.from("clientes").select("*").order("created_at", { ascending: false })
 
   return (
-    <DashboardLayout userEmail={user.email || ""}>
+    <DashboardLayout userEmail={user.email} userName={profile?.nome || undefined} userRole={profile?.role}>
       <div className="p-6 lg:p-8">
         <div className="flex items-center justify-between mb-8">
           <div>

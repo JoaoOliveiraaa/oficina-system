@@ -1,27 +1,19 @@
-import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
 import { DashboardLayout } from "@/components/dashboard-layout"
 import { Button } from "@/components/ui/button"
 import { Plus } from "lucide-react"
 import Link from "next/link"
 import { StockTable } from "@/components/stock-table"
+import { getUserWithProfile } from "@/lib/get-user-with-profile"
 
 export default async function EstoquePage() {
+  const { user, profile } = await getUserWithProfile()
   const supabase = await createClient()
-
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser()
-
-  if (error || !user) {
-    redirect("/auth/login")
-  }
 
   const { data: estoque } = await supabase.from("estoque").select("*").order("nome")
 
   return (
-    <DashboardLayout userEmail={user.email || ""}>
+    <DashboardLayout userEmail={user.email} userName={profile?.nome || undefined} userRole={profile?.role}>
       <div className="p-6 lg:p-8">
         <div className="flex items-center justify-between mb-8">
           <div>

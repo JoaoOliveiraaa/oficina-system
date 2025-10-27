@@ -84,6 +84,33 @@ async function logWebhook(
   }
 }
 
+async function relayToN8n(data: unknown): Promise<{ success: boolean; status: number; error?: string }> {
+  const n8nUrl =
+    process.env.N8N_WEBHOOK_URL || "https://defiant-lilly-disfavorably.ngrok-free.dev/webhook-test/receber-oficina"
+
+  try {
+    const response = await fetch(n8nUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(data),
+    })
+
+    return {
+      success: response.ok,
+      status: response.status,
+    }
+  } catch (error) {
+    console.error("[v0] Failed to relay to n8n:", error)
+    return {
+      success: false,
+      status: 500,
+      error: error instanceof Error ? error.message : "Failed to connect to n8n",
+    }
+  }
+}
+
 // Action: criar_os
 async function criarOS(supabase: ReturnType<typeof createAdminClient>, payload: CriarOSPayload) {
   const { cliente: clienteData, procedimento } = payload
@@ -310,6 +337,31 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "Invalid JSON payload" }, { status: 400 })
   }
 
+  if (!payload.acao) {
+    return NextResponse.json({ success: false, error: "Campo 'acao' é obrigatório" }, { status: 400 })
+  }
+
+  if (payload.acao === "criar_os") {
+    if (!payload.cliente?.nome || !payload.cliente?.telefone) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Campos 'cliente.nome' e 'cliente.telefone' são obrigatórios",
+        },
+        { status: 400 },
+      )
+    }
+    if (!payload.procedimento?.descricao) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Campo 'procedimento.descricao' é obrigatório",
+        },
+        { status: 400 },
+      )
+    }
+  }
+
   const supabase = createAdminClient()
 
   try {
@@ -340,7 +392,20 @@ export async function POST(request: NextRequest) {
     // Log success
     await logWebhook(supabase, payload.acao, payload, "sucesso", undefined, ip)
 
-    return NextResponse.json(result)
+    const n8nResponse = await relayToN8n({
+      ...payload,
+      resultado: result,
+      timestamp: new Date().toISOString(),
+    })
+
+    return NextResponse.json({
+      ...result,
+      n8n: {
+        enviado: n8nResponse.success,
+        status: n8nResponse.status,
+        erro: n8nResponse.error,
+      },
+    })
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Erro desconhecido"
 
@@ -348,6 +413,12 @@ export async function POST(request: NextRequest) {
     await logWebhook(supabase, payload.acao, payload, "erro", errorMessage, ip)
 
     console.error("[v0] Webhook error:", error)
+
+    await relayToN8n({
+      ...payload,
+      erro: errorMessage,
+      timestamp: new Date().toISOString(),
+    })
 
     return NextResponse.json({ success: false, error: errorMessage }, { status: 500 })
   }

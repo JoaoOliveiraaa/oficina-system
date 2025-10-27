@@ -7,7 +7,19 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
-import { LayoutDashboard, FileText, Users, Car, Package, Settings, Menu, Wrench, LogOut, Briefcase } from "lucide-react"
+import {
+  LayoutDashboard,
+  FileText,
+  Users,
+  Car,
+  Package,
+  Settings,
+  Menu,
+  Wrench,
+  LogOut,
+  Briefcase,
+  UserCog,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const navigation = [
@@ -17,18 +29,31 @@ const navigation = [
   { name: "Veículos", href: "/dashboard/veiculos", icon: Car },
   { name: "Serviços", href: "/dashboard/servicos", icon: Briefcase },
   { name: "Estoque", href: "/dashboard/estoque", icon: Package },
+  { name: "Funcionários", href: "/dashboard/funcionarios", icon: UserCog, adminOnly: true },
   { name: "Integrações", href: "/dashboard/integracoes", icon: Settings },
 ]
 
 export function DashboardLayout({
   children,
   userEmail,
+  userName,
+  userRole,
 }: {
   children: React.ReactNode
   userEmail: string
+  userName?: string
+  userRole?: string
 }) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
+
+  const roleDisplay =
+    {
+      admin: "Administrador",
+      mecanico: "Mecânico",
+    }[userRole || "admin"] || "Usuário"
+
+  const filteredNavigation = navigation.filter((item) => !item.adminOnly || userRole === "admin")
 
   return (
     <div className="min-h-screen bg-background">
@@ -46,7 +71,14 @@ export function DashboardLayout({
               </Button>
             </SheetTrigger>
             <SheetContent side="left" className="w-64 p-0">
-              <MobileNav pathname={pathname} onNavigate={() => setOpen(false)} userEmail={userEmail} />
+              <MobileNav
+                pathname={pathname}
+                onNavigate={() => setOpen(false)}
+                userEmail={userEmail}
+                userName={userName}
+                roleDisplay={roleDisplay}
+                navigation={filteredNavigation}
+              />
             </SheetContent>
           </Sheet>
         </div>
@@ -69,7 +101,7 @@ export function DashboardLayout({
             </div>
 
             <nav className="flex-1 p-4 space-y-1">
-              {navigation.map((item) => {
+              {filteredNavigation.map((item) => {
                 const isActive = pathname === item.href
                 return (
                   <Link
@@ -92,8 +124,8 @@ export function DashboardLayout({
             <div className="p-4 border-t border-border">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium truncate">{userEmail}</p>
-                  <p className="text-xs text-muted-foreground">Administrador</p>
+                  <p className="text-xs font-medium truncate">{userName || userEmail}</p>
+                  <p className="text-xs text-muted-foreground">{roleDisplay}</p>
                 </div>
               </div>
               <form action="/auth/signout" method="post">
@@ -117,10 +149,16 @@ function MobileNav({
   pathname,
   onNavigate,
   userEmail,
+  userName,
+  roleDisplay,
+  navigation,
 }: {
   pathname: string
   onNavigate: () => void
   userEmail: string
+  userName?: string
+  roleDisplay: string
+  navigation: typeof navigation
 }) {
   return (
     <div className="flex flex-col h-full">
@@ -160,8 +198,8 @@ function MobileNav({
 
       <div className="p-4 border-t border-border">
         <div className="mb-3">
-          <p className="text-xs font-medium truncate">{userEmail}</p>
-          <p className="text-xs text-muted-foreground">Administrador</p>
+          <p className="text-xs font-medium truncate">{userName || userEmail}</p>
+          <p className="text-xs text-muted-foreground">{roleDisplay}</p>
         </div>
         <form action="/auth/signout" method="post">
           <Button variant="outline" size="sm" className="w-full bg-transparent" type="submit">

@@ -1,26 +1,16 @@
-import { redirect } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
 import { DashboardLayout } from "@/components/dashboard-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { WebhookInfo } from "@/components/webhook-info"
 import { WebhookExamples } from "@/components/webhook-examples"
 import { WebhookLogs } from "@/components/webhook-logs"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { getUserWithProfile } from "@/lib/get-user-with-profile"
 
 export default async function IntegracoesPage() {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser()
-
-  if (error || !user) {
-    redirect("/auth/login")
-  }
+  const { user, profile } = await getUserWithProfile()
 
   return (
-    <DashboardLayout userEmail={user.email || ""}>
+    <DashboardLayout userEmail={user.email} userName={profile?.nome || undefined} userRole={profile?.role}>
       <div className="p-6 lg:p-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Integrações e Automação</h1>

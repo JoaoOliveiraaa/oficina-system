@@ -96,3 +96,16 @@ export interface HistoricoOS {
   usuario?: string
   created_at: string
 }
+
+export type UserRole = "admin" | "mecanico"
+
+export interface User {
+  id: string
+  email: string
+  nome: string | null
+  telefone: string | null
+  role: UserRole
+  ativo: boolean
+  created_at: string
+  updated_at: string
+}

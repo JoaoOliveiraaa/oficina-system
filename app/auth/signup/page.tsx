@@ -14,12 +14,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Wrench } from "lucide-react"
 
 export default function SignUpPage() {
+  const [nome, setNome] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
-  const [success, setSuccess] = useState(false)
   const router = useRouter()
   const supabase = createClient()
 
@@ -40,46 +40,31 @@ export default function SignUpPage() {
       return
     }
 
+    if (!nome.trim()) {
+      setError("Por favor, informe seu nome")
+      setLoading(false)
+      return
+    }
+
     try {
       const { error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/dashboard`,
+          data: {
+            nome: nome.trim(),
+          },
         },
       })
 
       if (error) throw error
 
-      setSuccess(true)
-      setTimeout(() => {
-        router.push("/auth/login")
-      }, 3000)
+      router.push("/dashboard")
     } catch (err: any) {
       setError(err.message || "Erro ao criar conta")
     } finally {
       setLoading(false)
     }
-  }
-
-  if (success) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="flex justify-center mb-4">
-              <div className="h-12 w-12 rounded-full bg-green-500/10 flex items-center justify-center">
-                <Wrench className="h-6 w-6 text-green-500" />
-              </div>
-            </div>
-            <CardTitle className="text-2xl font-bold">Conta criada com sucesso!</CardTitle>
-            <CardDescription>
-              Verifique seu email para confirmar sua conta. Você será redirecionado para o login em instantes...
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    )
   }
 
   return (
@@ -101,6 +86,18 @@ export default function SignUpPage() {
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
+            <div className="space-y-2">
+              <Label htmlFor="nome">Nome Completo</Label>
+              <Input
+                id="nome"
+                type="text"
+                placeholder="Seu nome completo"
+                value={nome}
+                onChange={(e) => setNome(e.target.value)}
+                required
+                disabled={loading}
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input

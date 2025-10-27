@@ -8,6 +8,7 @@ import Link from "next/link"
 import { format } from "date-fns"
 import { ptBR } from "date-fns/locale"
 import { formatOSNumber } from "@/lib/utils"
+import { getUserProfile } from "@/lib/supabase/auth"
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -20,6 +21,8 @@ export default async function DashboardPage() {
   if (error || !user) {
     redirect("/auth/login")
   }
+
+  const userProfile = await getUserProfile()
 
   const { count: ordensAbertas } = await supabase
     .from("ordens_servico")
@@ -61,7 +64,11 @@ export default async function DashboardPage() {
   }
 
   return (
-    <DashboardLayout userEmail={user.email || ""}>
+    <DashboardLayout
+      userEmail={user.email || ""}
+      userName={userProfile?.nome || undefined}
+      userRole={userProfile?.role}
+    >
       <div className="p-6 lg:p-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
