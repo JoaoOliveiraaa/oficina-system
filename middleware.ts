@@ -29,10 +29,10 @@ export async function middleware(request: NextRequest) {
 
   if (isProtectedRoute) {
     const {
-      data: { session },
-    } = await supabase.auth.getSession()
+      data: { user },
+    } = await supabase.auth.getUser()
 
-    if (!session?.user) {
+    if (!user) {
       const url = request.nextUrl.clone()
       url.pathname = "/auth/login"
       url.searchParams.set("redirect", request.nextUrl.pathname)
