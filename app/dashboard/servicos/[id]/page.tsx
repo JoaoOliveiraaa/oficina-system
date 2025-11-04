@@ -5,16 +5,17 @@ import { ServiceForm } from "@/components/service-form"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { getUserWithProfile } from "@/lib/get-user-with-profile"
 
-export default async function EditServicoPage({ params }: { params: { id: string } }) {
+export default async function EditServicoPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-  if (!uuidRegex.test(params.id)) {
+  if (!uuidRegex.test(id)) {
     redirect("/dashboard/servicos")
   }
 
   const { user, profile } = await getUserWithProfile()
   const supabase = await createClient()
 
-  const { data: servico, error } = await supabase.from("servicos").select("*").eq("id", params.id).single()
+  const { data: servico, error } = await supabase.from("servicos").select("*").eq("id", id).single()
 
   if (error || !servico) {
     redirect("/dashboard/servicos")

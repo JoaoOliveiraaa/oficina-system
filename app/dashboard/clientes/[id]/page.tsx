@@ -5,16 +5,17 @@ import { ClientForm } from "@/components/client-form"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { getUserWithProfile } from "@/lib/get-user-with-profile"
 
-export default async function EditClientePage({ params }: { params: { id: string } }) {
+export default async function EditClientePage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-  if (!uuidRegex.test(params.id)) {
+  if (!uuidRegex.test(id)) {
     redirect("/dashboard/clientes")
   }
 
   const { user, profile } = await getUserWithProfile()
   const supabase = await createClient()
 
-  const { data: cliente, error } = await supabase.from("clientes").select("*").eq("id", params.id).single()
+  const { data: cliente, error } = await supabase.from("clientes").select("*").eq("id", id).single()
 
   if (error || !cliente) {
     redirect("/dashboard/clientes")

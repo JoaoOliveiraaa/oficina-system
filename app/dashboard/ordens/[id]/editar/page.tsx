@@ -9,8 +9,9 @@ function isValidUUID(id: string): boolean {
   return uuidRegex.test(id)
 }
 
-export default async function EditarOrdemPage({ params }: { params: { id: string } }) {
-  if (!isValidUUID(params.id)) {
+export default async function EditarOrdemPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  if (!isValidUUID(id)) {
     redirect("/dashboard/ordens")
   }
 
@@ -21,20 +22,13 @@ export default async function EditarOrdemPage({ params }: { params: { id: string
   const { data: ordem, error: ordemError } = await supabase
     .from("ordens_servico")
     .select("*")
-    .eq("id", params.id)
+    .eq("id", id)
     .single()
 
   if (ordemError || !ordem) {
     console.log("[v0] Order not found, redirecting:", ordemError)
     redirect("/dashboard/ordens")
   }
-
-  // Fetch procedures for this order
-  const { data: procedimentos } = await supabase
-    .from("procedimentos")
-    .select("*")
-    .eq("ordem_servico_id", params.id)
-    .order("created_at")
 
   // Fetch clients and vehicles for the form
   const { data: clientes } = await supabase.from("clientes").select("*").order("nome")
@@ -51,7 +45,6 @@ export default async function EditarOrdemPage({ params }: { params: { id: string
           </div>
           <OrderForm
             ordem={ordem}
-            procedimentos={procedimentos || []}
             clientes={clientes || []}
             veiculos={veiculos || []}
           />

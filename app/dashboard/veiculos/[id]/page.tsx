@@ -5,16 +5,17 @@ import { VehicleForm } from "@/components/vehicle-form"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { getUserWithProfile } from "@/lib/get-user-with-profile"
 
-export default async function EditVeiculoPage({ params }: { params: { id: string } }) {
+export default async function EditVeiculoPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-  if (!uuidRegex.test(params.id)) {
+  if (!uuidRegex.test(id)) {
     redirect("/dashboard/veiculos")
   }
 
   const { user, profile } = await getUserWithProfile()
   const supabase = await createClient()
 
-  const { data: veiculo, error } = await supabase.from("veiculos").select("*").eq("id", params.id).single()
+  const { data: veiculo, error } = await supabase.from("veiculos").select("*").eq("id", id).single()
 
   const { data: clientes } = await supabase.from("clientes").select("id, nome").order("nome")
 

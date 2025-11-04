@@ -35,8 +35,9 @@ function isValidUUID(id: string): boolean {
   return uuidRegex.test(id)
 }
 
-export default async function OrdemDetalhePage({ params }: { params: { id: string } }) {
-  if (!isValidUUID(params.id)) {
+export default async function OrdemDetalhePage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  if (!isValidUUID(id)) {
     redirect("/dashboard/ordens")
   }
 
@@ -46,7 +47,7 @@ export default async function OrdemDetalhePage({ params }: { params: { id: strin
   const { data: ordem, error } = await supabase
     .from("ordens_servico")
     .select("*, veiculos(placa, modelo, marca, ano, cor), clientes(nome, telefone, email)")
-    .eq("id", params.id)
+    .eq("id", id)
     .single()
 
   console.log("[v0] Order fetch result:", { ordem, error })
@@ -59,10 +60,10 @@ export default async function OrdemDetalhePage({ params }: { params: { id: strin
   const { data: procedimentos } = await supabase
     .from("procedimentos")
     .select("*")
-    .eq("ordem_servico_id", params.id)
+    .eq("ordem_servico_id", id)
     .order("created_at")
 
-  const { data: fotos } = await supabase.from("fotos").select("*").eq("ordem_servico_id", params.id).order("created_at")
+  const { data: fotos } = await supabase.from("fotos").select("*").eq("ordem_servico_id", id).order("created_at")
 
   return (
     <DashboardLayout userEmail={user.email} userName={profile?.nome || undefined} userRole={profile?.role}>
@@ -79,7 +80,7 @@ export default async function OrdemDetalhePage({ params }: { params: { id: strin
               </div>
               <p className="text-muted-foreground">Detalhes da ordem de serviço</p>
             </div>
-            <Link href={`/dashboard/ordens/${params.id}/editar`}>
+            <Link href={`/dashboard/ordens/${id}/editar`}>
               <Button>
                 <Edit className="h-4 w-4 mr-2" />
                 Editar
@@ -230,7 +231,7 @@ export default async function OrdemDetalhePage({ params }: { params: { id: strin
               <CardDescription>Fotos do veículo e dos serviços realizados</CardDescription>
             </CardHeader>
             <CardContent>
-              <PhotoUpload ordemServicoId={params.id} photos={fotos || []} />
+              <PhotoUpload ordemServicoId={id} photos={fotos || []} />
             </CardContent>
           </Card>
         </div>
