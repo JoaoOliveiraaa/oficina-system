@@ -24,20 +24,20 @@ type Ordem = {
 }
 
 const statusColors: Record<string, string> = {
-  aguardando: "bg-yellow-500/10 text-yellow-700 border-yellow-500/20",
+  pendente: "bg-yellow-500/10 text-yellow-700 border-yellow-500/20",
   em_andamento: "bg-blue-500/10 text-blue-700 border-blue-500/20",
   aguardando_pecas: "bg-orange-500/10 text-orange-700 border-orange-500/20",
-  pronto: "bg-green-500/10 text-green-700 border-green-500/20",
-  entregue: "bg-gray-500/10 text-gray-700 border-gray-500/20",
+  pronto_retirada: "bg-green-500/10 text-green-700 border-green-500/20",
+  finalizado: "bg-gray-500/10 text-gray-700 border-gray-500/20",
   cancelado: "bg-red-500/10 text-red-700 border-red-500/20",
 }
 
 const statusLabels: Record<string, string> = {
-  aguardando: "Aguardando",
+  pendente: "Pendente",
   em_andamento: "Em Andamento",
   aguardando_pecas: "Aguardando Peças",
-  pronto: "Pronto",
-  entregue: "Entregue",
+  pronto_retirada: "Pronto para Retirada",
+  finalizado: "Finalizado",
   cancelado: "Cancelado",
 }
 

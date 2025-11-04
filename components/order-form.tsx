@@ -71,7 +71,7 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
     cliente_id: ordem?.cliente_id || "",
     veiculo_id: ordem?.veiculo_id || "",
     descricao: ordem?.descricao || "",
-    status: ordem?.status || "aguardando",
+    status: ordem?.status || "pendente",
     data_entrada: ordem?.data_entrada ? formatDateForInput(ordem.data_entrada) : new Date().toISOString().split("T")[0],
     data_prevista: formatDateForInput(ordem?.data_prevista),
     observacoes: ordem?.observacoes || "",
@@ -306,11 +306,12 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="aguardando">Aguardando</SelectItem>
+              <SelectItem value="pendente">Pendente</SelectItem>
               <SelectItem value="em_andamento">Em Andamento</SelectItem>
               <SelectItem value="aguardando_pecas">Aguardando Peças</SelectItem>
-              <SelectItem value="pronto">Pronto</SelectItem>
-              <SelectItem value="entregue">Entregue</SelectItem>
+              <SelectItem value="pronto_retirada">Pronto para Retirada</SelectItem>
+              <SelectItem value="finalizado">Finalizado</SelectItem>
+              <SelectItem value="cancelado">Cancelado</SelectItem>
             </SelectContent>
           </Select>
         </div>
