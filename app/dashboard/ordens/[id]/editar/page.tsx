@@ -11,7 +11,8 @@ function isValidUUID(id: string): boolean {
 
 export default async function EditarOrdemPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  if (!isValidUUID(id)) {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  if (!uuidRegex.test(id)) {
     redirect("/dashboard/ordens")
   }
 
@@ -26,7 +27,6 @@ export default async function EditarOrdemPage({ params }: { params: Promise<{ id
     .single()
 
   if (ordemError || !ordem) {
-    console.log("[v0] Order not found, redirecting:", ordemError)
     redirect("/dashboard/ordens")
   }
 

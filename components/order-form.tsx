@@ -44,6 +44,21 @@ type Procedimento = {
   valor: string
 }
 
+// Helper function to format date for input type="date"
+function formatDateForInput(date: string | null | undefined): string {
+  if (!date) return ""
+  // If date is already in YYYY-MM-DD format, return as is
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return date
+  // If date is in ISO format with time, extract just the date part
+  try {
+    const dateObj = new Date(date)
+    if (isNaN(dateObj.getTime())) return ""
+    return dateObj.toISOString().split("T")[0]
+  } catch {
+    return ""
+  }
+}
+
 export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes: Cliente[]; veiculos: Veiculo[] }) {
   const router = useRouter()
   const supabase = createClient()
@@ -57,8 +72,8 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
     veiculo_id: ordem?.veiculo_id || "",
     descricao: ordem?.descricao || "",
     status: ordem?.status || "aguardando",
-    data_entrada: ordem?.data_entrada || new Date().toISOString().split("T")[0],
-    data_prevista: ordem?.data_prevista || "",
+    data_entrada: ordem?.data_entrada ? formatDateForInput(ordem.data_entrada) : new Date().toISOString().split("T")[0],
+    data_prevista: formatDateForInput(ordem?.data_prevista),
     observacoes: ordem?.observacoes || "",
   })
 
