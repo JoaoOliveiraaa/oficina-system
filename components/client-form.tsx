@@ -12,19 +12,22 @@ import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Loader2 } from "lucide-react"
 
-export function ClientForm({ cliente }: { cliente?: any }) {
+export function ClientForm({ cliente, initialData, isEditing }: { cliente?: any; initialData?: any; isEditing?: boolean }) {
   const router = useRouter()
   const supabase = createClient()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
+  // Use initialData if provided, otherwise use cliente (for backward compatibility)
+  const clienteData = initialData || cliente
+
   const [formData, setFormData] = useState({
-    nome: cliente?.nome || "",
-    telefone: cliente?.telefone || "",
-    email: cliente?.email || "",
-    cpf_cnpj: cliente?.cpf_cnpj || "",
-    endereco: cliente?.endereco || "",
-    observacoes: cliente?.observacoes || "",
+    nome: clienteData?.nome || "",
+    telefone: clienteData?.telefone || "",
+    email: clienteData?.email || "",
+    cpf_cnpj: clienteData?.cpf_cnpj || "",
+    endereco: clienteData?.endereco || "",
+    observacoes: clienteData?.observacoes || "",
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -33,8 +36,8 @@ export function ClientForm({ cliente }: { cliente?: any }) {
     setLoading(true)
 
     try {
-      if (cliente) {
-        const { error } = await supabase.from("clientes").update(formData).eq("id", cliente.id)
+      if (clienteData) {
+        const { error } = await supabase.from("clientes").update(formData).eq("id", clienteData.id)
         if (error) throw error
       } else {
         const { error } = await supabase.from("clientes").insert([formData])
@@ -127,7 +130,7 @@ export function ClientForm({ cliente }: { cliente?: any }) {
       <div className="flex gap-2 pt-4">
         <Button type="submit" disabled={loading}>
           {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-          {cliente ? "Atualizar" : "Cadastrar"}
+          {clienteData ? "Atualizar" : "Cadastrar"}
         </Button>
         <Button type="button" variant="outline" onClick={() => router.back()} disabled={loading}>
           Cancelar

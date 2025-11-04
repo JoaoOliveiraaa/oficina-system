@@ -12,21 +12,24 @@ import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Loader2 } from "lucide-react"
 
-export function StockForm({ item }: { item?: any }) {
+export function StockForm({ item, initialData, isEditing }: { item?: any; initialData?: any; isEditing?: boolean }) {
   const router = useRouter()
   const supabase = createClient()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
+  // Use initialData if provided, otherwise use item (for backward compatibility)
+  const itemData = initialData || item
+
   const [formData, setFormData] = useState({
-    codigo: item?.codigo || "",
-    nome: item?.nome || "",
-    categoria: item?.categoria || "",
-    quantidade: item?.quantidade || "0",
-    estoque_minimo: item?.estoque_minimo || "5",
-    valor_unitario: item?.valor_unitario || "",
-    localizacao: item?.localizacao || "",
-    observacoes: item?.observacoes || "",
+    codigo: itemData?.codigo || "",
+    nome: itemData?.nome || "",
+    categoria: itemData?.categoria || "",
+    quantidade: itemData?.quantidade?.toString() || "0",
+    estoque_minimo: itemData?.estoque_minimo?.toString() || "5",
+    valor_unitario: itemData?.valor_unitario ? itemData.valor_unitario.toString() : "",
+    localizacao: itemData?.localizacao || "",
+    observacoes: itemData?.observacoes || "",
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -42,8 +45,8 @@ export function StockForm({ item }: { item?: any }) {
         valor_unitario: formData.valor_unitario ? Number.parseFloat(formData.valor_unitario) : null,
       }
 
-      if (item) {
-        const { error } = await supabase.from("estoque").update(data).eq("id", item.id)
+      if (itemData) {
+        const { error } = await supabase.from("estoque").update(data).eq("id", itemData.id)
         if (error) throw error
       } else {
         const { error } = await supabase.from("estoque").insert([data])
@@ -168,7 +171,7 @@ export function StockForm({ item }: { item?: any }) {
       <div className="flex gap-2 pt-4">
         <Button type="submit" disabled={loading}>
           {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-          {item ? "Atualizar" : "Cadastrar"}
+          {itemData ? "Atualizar" : "Cadastrar"}
         </Button>
         <Button type="button" variant="outline" onClick={() => router.back()} disabled={loading}>
           Cancelar
