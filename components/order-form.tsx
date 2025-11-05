@@ -14,6 +14,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Loader2, Plus, Trash2 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { PhotoUpload } from "@/components/photo-upload"
 
 type Cliente = {
   id: string
@@ -74,11 +75,13 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
     status: ordem?.status || "pendente",
     data_entrada: ordem?.data_entrada ? formatDateForInput(ordem.data_entrada) : new Date().toISOString().split("T")[0],
     data_prevista: formatDateForInput(ordem?.data_prevista),
+    data_conclusao: formatDateForInput(ordem?.data_conclusao),
     observacoes: ordem?.observacoes || "",
   })
 
   const [procedimentos, setProcedimentos] = useState<Procedimento[]>([{ descricao: "", valor: "" }])
   const [filteredVeiculos, setFilteredVeiculos] = useState<Veiculo[]>(veiculos)
+  const [fotos, setFotos] = useState<any[]>([])
 
   useEffect(() => {
     const loadProcedimentos = async () => {
@@ -99,6 +102,18 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
             })),
           )
         }
+
+        // Load photos
+        const { data: fotosData } = await supabase
+          .from("fotos")
+          .select("*")
+          .eq("ordem_servico_id", ordem.id)
+          .order("created_at")
+
+        if (fotosData) {
+          setFotos(fotosData)
+        }
+
         setLoadingProcedimentos(false)
       }
     }
@@ -158,6 +173,18 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
     setLoading(true)
 
     try {
+      // Validate data de conclusão
+      if (formData.data_conclusao) {
+        const dataConclusao = new Date(formData.data_conclusao)
+        const hoje = new Date()
+        hoje.setHours(0, 0, 0, 0)
+        if (dataConclusao < hoje) {
+          setError("A data de conclusão não pode ser anterior à data atual")
+          setLoading(false)
+          return
+        }
+      }
+
       const valorTotal = procedimentos.reduce((sum, p) => sum + (Number.parseFloat(p.valor) || 0), 0)
 
       if (ordem) {
@@ -167,6 +194,7 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
           .update({
             ...formData,
             data_prevista: formData.data_prevista || null,
+            data_conclusao: formData.data_conclusao || null,
             valor_total: valorTotal,
           })
           .eq("id", ordem.id)
@@ -298,7 +326,7 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
         />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <div className="space-y-2">
           <Label htmlFor="status">Status</Label>
           <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
@@ -335,6 +363,18 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
             type="date"
             value={formData.data_prevista}
             onChange={(e) => setFormData({ ...formData, data_prevista: e.target.value })}
+            disabled={loading}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="data_conclusao">Data de Conclusão</Label>
+          <Input
+            id="data_conclusao"
+            type="date"
+            value={formData.data_conclusao}
+            onChange={(e) => setFormData({ ...formData, data_conclusao: e.target.value })}
+            min={new Date().toISOString().split("T")[0]}
             disabled={loading}
           />
         </div>
@@ -440,6 +480,18 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
           placeholder="Informações adicionais sobre o serviço..."
         />
       </div>
+
+      {ordem?.id && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Fotos</CardTitle>
+            <CardDescription>Fotos do veículo e dos serviços realizados</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <PhotoUpload ordemServicoId={ordem.id} photos={fotos} />
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex gap-2 pt-4">
         <Button type="submit" disabled={loading}>

@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -22,6 +22,11 @@ export function PhotoUpload({ ordemServicoId, photos }: { ordemServicoId: string
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState("")
   const [localPhotos, setLocalPhotos] = useState<Photo[]>(photos)
+
+  // Sync with props when photos change
+  useEffect(() => {
+    setLocalPhotos(photos)
+  }, [photos])
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -60,7 +65,7 @@ export function PhotoUpload({ ordemServicoId, photos }: { ordemServicoId: string
 
         if (dbError) throw dbError
 
-        setLocalPhotos([...localPhotos, data])
+        setLocalPhotos((prev) => [...prev, data])
       }
     } catch (err: any) {
       setError(err.message || "Erro ao fazer upload")
