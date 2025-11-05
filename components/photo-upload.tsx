@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Upload, X, Loader2, ImageIcon } from "lucide-react"
 import Image from "next/image"
 
@@ -22,6 +23,7 @@ export function PhotoUpload({ ordemServicoId, photos }: { ordemServicoId: string
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState("")
   const [localPhotos, setLocalPhotos] = useState<Photo[]>(photos)
+  const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null)
 
   // Sync with props when photos change
   useEffect(() => {
@@ -130,23 +132,41 @@ export function PhotoUpload({ ordemServicoId, photos }: { ordemServicoId: string
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {localPhotos.map((photo) => (
-            <Card key={photo.id} className="relative group overflow-hidden">
-              <div className="aspect-square relative">
-                <Image
-                  src={photo.url || "/placeholder.svg"}
-                  alt={photo.descricao || "Foto"}
-                  fill
-                  className="object-cover"
-                />
-                <Button
-                  variant="destructive"
-                  size="icon"
-                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                  onClick={() => handleDelete(photo.id, photo.url)}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
+            <Card key={photo.id} className="relative group overflow-hidden cursor-pointer">
+              <Dialog>
+                <DialogTrigger asChild>
+                  <div className="aspect-square relative" onClick={() => setSelectedPhoto(photo)}>
+                    <Image
+                      src={photo.url || "/placeholder.svg"}
+                      alt={photo.descricao || "Foto"}
+                      fill
+                      className="object-cover"
+                    />
+                    <Button
+                      variant="destructive"
+                      size="icon"
+                      className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDelete(photo.id, photo.url)
+                      }}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </DialogTrigger>
+                <DialogContent className="max-w-4xl w-full p-0">
+                  <DialogTitle className="sr-only">Visualizar Foto</DialogTitle>
+                  <div className="relative w-full h-[80vh]">
+                    <Image
+                      src={photo.url || "/placeholder.svg"}
+                      alt={photo.descricao || "Foto"}
+                      fill
+                      className="object-contain"
+                    />
+                  </div>
+                </DialogContent>
+              </Dialog>
             </Card>
           ))}
         </div>
