@@ -51,8 +51,10 @@ function validateAuthorization(request: NextRequest): boolean {
 
   console.log(`[WEBHOOK] Validating authorization:`, {
     hasAuthHeader: !!authHeader,
-    authHeaderPrefix: authHeader?.substring(0, 20),
+    authHeaderValue: authHeader ? `${authHeader.substring(0, 30)}...` : null,
+    authHeaderFull: authHeader, // Log completo para debug
     hasWebhookSecret: !!webhookSecret,
+    webhookSecretLength: webhookSecret?.length || 0,
   })
 
   if (!webhookSecret) {
@@ -60,17 +62,37 @@ function validateAuthorization(request: NextRequest): boolean {
     return false
   }
 
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    console.log("[WEBHOOK] No valid Authorization header found")
+  if (!authHeader) {
+    console.log("[WEBHOOK] No Authorization header found")
     return false
   }
 
-  const token = authHeader.substring(7)
-  const isValid = token === webhookSecret
+  // Aceita tanto "Bearer TOKEN" quanto apenas "TOKEN"
+  // Remove espaços extras e normaliza
+  let token: string
+  if (authHeader.toLowerCase().startsWith("bearer ")) {
+    token = authHeader.substring(7).trim()
+  } else {
+    token = authHeader.trim()
+  }
+
+  // Remove espaços extras e compara
+  const normalizedToken = token.replace(/\s+/g, " ").trim()
+  const normalizedSecret = webhookSecret.trim()
+  
+  const isValid = normalizedToken === normalizedSecret
   
   console.log(`[WEBHOOK] Token validation:`, {
+    tokenReceived: `${token.substring(0, 10)}...`,
     tokenLength: token.length,
+    normalizedTokenLength: normalizedToken.length,
+    secretLength: webhookSecret.length,
+    normalizedSecretLength: normalizedSecret.length,
     isValid,
+    tokensMatchExact: token === webhookSecret,
+    normalizedTokensMatch: normalizedToken === normalizedSecret,
+    tokenFirstChars: token.substring(0, 20),
+    secretFirstChars: webhookSecret.substring(0, 20),
   })
   
   return isValid
@@ -365,6 +387,10 @@ async function consultarOS(supabase: ReturnType<typeof createAdminClient>, paylo
 
 // Main POST handler
 export async function POST(request: NextRequest) {
+  // Log ANTES de qualquer coisa para garantir que capturamos todas as requisições
+  console.log(`[WEBHOOK] ========== POST REQUEST RECEIVED ==========`)
+  console.log(`[WEBHOOK] Timestamp:`, new Date().toISOString())
+  
   const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
   const method = request.method
   const url = request.url
@@ -372,7 +398,8 @@ export async function POST(request: NextRequest) {
   // Log all incoming requests for debugging
   console.log(`[WEBHOOK] ${method} request received from ${ip}`, {
     url,
-    headers: Object.fromEntries(request.headers.entries()),
+    allHeaders: Object.fromEntries(request.headers.entries()),
+    authorizationHeader: request.headers.get("authorization") || request.headers.get("Authorization") || "NOT FOUND",
   })
 
   // Validate authorization
@@ -568,6 +595,10 @@ export async function POST(request: NextRequest) {
 
 // GET handler for health check
 export async function GET(request: NextRequest) {
+  // Log ANTES de qualquer coisa
+  console.log(`[WEBHOOK] ========== GET REQUEST RECEIVED ==========`)
+  console.log(`[WEBHOOK] Timestamp:`, new Date().toISOString())
+  
   const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
   
   console.log(`[WEBHOOK] GET request received from ${ip}`, {
@@ -595,6 +626,10 @@ export async function GET(request: NextRequest) {
 
 // OPTIONS handler for CORS preflight (required for n8n webhook trigger)
 export async function OPTIONS(request: NextRequest) {
+  // Log ANTES de qualquer coisa
+  console.log(`[WEBHOOK] ========== OPTIONS REQUEST RECEIVED ==========`)
+  console.log(`[WEBHOOK] Timestamp:`, new Date().toISOString())
+  
   const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
   
   console.log(`[WEBHOOK] OPTIONS request received from ${ip}`, {
