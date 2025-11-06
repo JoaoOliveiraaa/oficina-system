@@ -93,7 +93,7 @@ async function relayToN8n(data: unknown): Promise<{ success: boolean; status: nu
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": 'Bearer ${process.env.N8N_WEBHOOK_SECRET}'
+        "Authorization": 'Bearer ${process.env.WEBHOOK_SECRET}'
       },
   body: JSON.stringify(data),
     })
