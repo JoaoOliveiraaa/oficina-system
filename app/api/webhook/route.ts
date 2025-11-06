@@ -46,20 +46,34 @@ type WebhookPayload = CriarOSPayload | AtualizarStatusPayload | RegistrarFotoPay
 
 // Helper function to validate authorization
 function validateAuthorization(request: NextRequest): boolean {
-  const authHeader = request.headers.get("authorization")
+  const authHeader = request.headers.get("authorization") || request.headers.get("Authorization")
   const webhookSecret = process.env.WEBHOOK_SECRET
 
+  console.log(`[WEBHOOK] Validating authorization:`, {
+    hasAuthHeader: !!authHeader,
+    authHeaderPrefix: authHeader?.substring(0, 20),
+    hasWebhookSecret: !!webhookSecret,
+  })
+
   if (!webhookSecret) {
-    console.error("[v0] WEBHOOK_SECRET not configured")
+    console.error("[WEBHOOK] WEBHOOK_SECRET not configured")
     return false
   }
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    console.log("[WEBHOOK] No valid Authorization header found")
     return false
   }
 
   const token = authHeader.substring(7)
-  return token === webhookSecret
+  const isValid = token === webhookSecret
+  
+  console.log(`[WEBHOOK] Token validation:`, {
+    tokenLength: token.length,
+    isValid,
+  })
+  
+  return isValid
 }
 
 // Helper function to log webhook calls
@@ -88,29 +102,50 @@ async function relayToN8n(data: unknown): Promise<{ success: boolean; status: nu
   const n8nUrl =
     process.env.N8N_WEBHOOK_URL || "https://defiant-lilly-disfavorably.ngrok-free.dev/webhook-test/receber-oficina"
 
+  console.log(`[WEBHOOK] Attempting to relay to n8n:`, {
+    url: n8nUrl,
+    hasData: !!data,
+    dataSize: JSON.stringify(data).length,
+  })
+
   try {
     const response = await fetch(n8nUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.WEBHOOK_SECRET}`,
+        "Authorization": `Bearer ${process.env.N8N_WEBHOOK_SECRET}`,
       },
       body: JSON.stringify(data),
     })
 
     const responseText = await response.text()
     
+    console.log(`[WEBHOOK] n8n response:`, {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+      responseText: responseText.substring(0, 200), // Primeiros 200 caracteres
+    })
+    
     if (!response.ok) {
-      console.error("[v0] n8n returned error:", response.status, responseText)
+      console.error(`[WEBHOOK] n8n returned error:`, {
+        status: response.status,
+        statusText: response.statusText,
+        responseText,
+      })
     }
 
     return {
       success: response.ok,
       status: response.status,
-      error: response.ok ? undefined : `n8n returned ${response.status}: ${responseText}`,
+      error: response.ok ? undefined : `n8n returned ${response.status}: ${responseText.substring(0, 100)}`,
     }
   } catch (error) {
-    console.error("[v0] Failed to relay to n8n:", error)
+    console.error(`[WEBHOOK] Failed to relay to n8n:`, {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      url: n8nUrl,
+    })
     return {
       success: false,
       status: 500,
@@ -331,9 +366,18 @@ async function consultarOS(supabase: ReturnType<typeof createAdminClient>, paylo
 // Main POST handler
 export async function POST(request: NextRequest) {
   const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
+  const method = request.method
+  const url = request.url
+
+  // Log all incoming requests for debugging
+  console.log(`[WEBHOOK] ${method} request received from ${ip}`, {
+    url,
+    headers: Object.fromEntries(request.headers.entries()),
+  })
 
   // Validate authorization
   if (!validateAuthorization(request)) {
+    console.log(`[WEBHOOK] Authorization failed for ${ip}`)
     return NextResponse.json(
       { success: false, error: "Unauthorized" },
       {
@@ -347,11 +391,15 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  console.log(`[WEBHOOK] Authorization successful for ${ip}`)
+
   let payload: WebhookPayload
 
   try {
     payload = await request.json()
-  } catch {
+    console.log(`[WEBHOOK] Payload received:`, JSON.stringify(payload, null, 2))
+  } catch (error) {
+    console.error(`[WEBHOOK] Failed to parse JSON:`, error)
     return NextResponse.json(
       { success: false, error: "Invalid JSON payload" },
       {
@@ -452,13 +500,17 @@ export async function POST(request: NextRequest) {
     }
 
     // Log success
+    console.log(`[WEBHOOK] Processing action: ${payload.acao}`)
     await logWebhook(supabase, payload.acao, payload, "sucesso", undefined, ip)
+    console.log(`[WEBHOOK] Action ${payload.acao} completed successfully`)
 
     const n8nResponse = await relayToN8n({
       ...payload,
       resultado: result,
       timestamp: new Date().toISOString(),
     })
+
+    console.log(`[WEBHOOK] n8n relay response:`, n8nResponse)
 
     return NextResponse.json(
       {
@@ -480,16 +532,25 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Erro desconhecido"
 
+    console.error(`[WEBHOOK] Error processing request:`, error)
+    console.error(`[WEBHOOK] Error stack:`, error instanceof Error ? error.stack : "No stack trace")
+
     // Log error
-    await logWebhook(supabase, payload.acao, payload, "erro", errorMessage, ip)
+    try {
+      await logWebhook(supabase, payload?.acao || "unknown", payload, "erro", errorMessage, ip)
+    } catch (logError) {
+      console.error(`[WEBHOOK] Failed to log error:`, logError)
+    }
 
-    console.error("[v0] Webhook error:", error)
-
-    await relayToN8n({
-      ...payload,
-      erro: errorMessage,
-      timestamp: new Date().toISOString(),
-    })
+    try {
+      await relayToN8n({
+        ...payload,
+        erro: errorMessage,
+        timestamp: new Date().toISOString(),
+      })
+    } catch (relayError) {
+      console.error(`[WEBHOOK] Failed to relay error to n8n:`, relayError)
+    }
 
     return NextResponse.json(
       { success: false, error: errorMessage },
@@ -506,16 +567,41 @@ export async function POST(request: NextRequest) {
 }
 
 // GET handler for health check
-export async function GET() {
-  return NextResponse.json({
-    status: "ok",
-    message: "Webhook API is running",
-    timestamp: new Date().toISOString(),
+export async function GET(request: NextRequest) {
+  const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
+  
+  console.log(`[WEBHOOK] GET request received from ${ip}`, {
+    url: request.url,
+    headers: Object.fromEntries(request.headers.entries()),
   })
+
+  return NextResponse.json(
+    {
+      status: "ok",
+      message: "Webhook API is running",
+      timestamp: new Date().toISOString(),
+      endpoint: "/api/webhook",
+      methods: ["GET", "POST", "OPTIONS"],
+    },
+    {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      },
+    },
+  )
 }
 
 // OPTIONS handler for CORS preflight (required for n8n webhook trigger)
-export async function OPTIONS() {
+export async function OPTIONS(request: NextRequest) {
+  const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
+  
+  console.log(`[WEBHOOK] OPTIONS request received from ${ip}`, {
+    url: request.url,
+    headers: Object.fromEntries(request.headers.entries()),
+  })
+
   return new NextResponse(null, {
     status: 200,
     headers: {
