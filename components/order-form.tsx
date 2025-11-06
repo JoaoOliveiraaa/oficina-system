@@ -188,6 +188,9 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
       const valorTotal = procedimentos.reduce((sum, p) => sum + (Number.parseFloat(p.valor) || 0), 0)
 
       if (ordem) {
+        // Check if status changed
+        const statusChanged = ordem.status !== formData.status
+
         // Update existing ordem
         const { error: osError } = await supabase
           .from("ordens_servico")
@@ -200,6 +203,32 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
           .eq("id", ordem.id)
 
         if (osError) throw osError
+
+        // If status changed, notify webhook via internal API
+        if (statusChanged) {
+          try {
+            const response = await fetch("/api/orders/notify-status-change", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                numero_os: ordem.numero_os,
+                status_anterior: ordem.status,
+                status_novo: formData.status,
+              }),
+            })
+
+            if (!response.ok) {
+              console.error("Failed to notify webhook:", await response.text())
+            } else {
+              console.log("Webhook notified successfully")
+            }
+          } catch (webhookError) {
+            console.error("Error calling webhook:", webhookError)
+            // Don't fail the main operation if webhook fails
+          }
+        }
 
         // Delete existing procedimentos and insert new ones
         await supabase.from("procedimentos").delete().eq("ordem_servico_id", ordem.id)
