@@ -93,14 +93,21 @@ async function relayToN8n(data: unknown): Promise<{ success: boolean; status: nu
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": 'Bearer ${process.env.WEBHOOK_SECRET}'
+        "Authorization": `Bearer ${process.env.WEBHOOK_SECRET}`,
       },
-  body: JSON.stringify(data),
+      body: JSON.stringify(data),
     })
+
+    const responseText = await response.text()
+    
+    if (!response.ok) {
+      console.error("[v0] n8n returned error:", response.status, responseText)
+    }
 
     return {
       success: response.ok,
       status: response.status,
+      error: response.ok ? undefined : `n8n returned ${response.status}: ${responseText}`,
     }
   } catch (error) {
     console.error("[v0] Failed to relay to n8n:", error)
@@ -327,7 +334,17 @@ export async function POST(request: NextRequest) {
 
   // Validate authorization
   if (!validateAuthorization(request)) {
-    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      {
+        status: 401,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
+      },
+    )
   }
 
   let payload: WebhookPayload
@@ -335,11 +352,31 @@ export async function POST(request: NextRequest) {
   try {
     payload = await request.json()
   } catch {
-    return NextResponse.json({ success: false, error: "Invalid JSON payload" }, { status: 400 })
+    return NextResponse.json(
+      { success: false, error: "Invalid JSON payload" },
+      {
+        status: 400,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
+      },
+    )
   }
 
   if (!payload.acao) {
-    return NextResponse.json({ success: false, error: "Campo 'acao' é obrigatório" }, { status: 400 })
+    return NextResponse.json(
+      { success: false, error: "Campo 'acao' é obrigatório" },
+      {
+        status: 400,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
+      },
+    )
   }
 
   if (payload.acao === "criar_os") {
@@ -349,7 +386,14 @@ export async function POST(request: NextRequest) {
           success: false,
           error: "Campos 'cliente.nome' e 'cliente.telefone' são obrigatórios",
         },
-        { status: 400 },
+        {
+          status: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          },
+        },
       )
     }
     if (!payload.procedimento?.descricao) {
@@ -358,7 +402,14 @@ export async function POST(request: NextRequest) {
           success: false,
           error: "Campo 'procedimento.descricao' é obrigatório",
         },
-        { status: 400 },
+        {
+          status: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          },
+        },
       )
     }
   }
@@ -387,7 +438,17 @@ export async function POST(request: NextRequest) {
 
       default:
         await logWebhook(supabase, "unknown", payload, "erro", "Ação não reconhecida", ip)
-        return NextResponse.json({ success: false, error: "Ação não reconhecida" }, { status: 400 })
+        return NextResponse.json(
+          { success: false, error: "Ação não reconhecida" },
+          {
+            status: 400,
+            headers: {
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+              "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            },
+          },
+        )
     }
 
     // Log success
@@ -399,14 +460,23 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     })
 
-    return NextResponse.json({
-      ...result,
-      n8n: {
-        enviado: n8nResponse.success,
-        status: n8nResponse.status,
-        erro: n8nResponse.error,
+    return NextResponse.json(
+      {
+        ...result,
+        n8n: {
+          enviado: n8nResponse.success,
+          status: n8nResponse.status,
+          erro: n8nResponse.error,
+        },
       },
-    })
+      {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
+      },
+    )
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Erro desconhecido"
 
@@ -421,7 +491,17 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     })
 
-    return NextResponse.json({ success: false, error: errorMessage }, { status: 500 })
+    return NextResponse.json(
+      { success: false, error: errorMessage },
+      {
+        status: 500,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
+      },
+    )
   }
 }
 
@@ -431,5 +511,18 @@ export async function GET() {
     status: "ok",
     message: "Webhook API is running",
     timestamp: new Date().toISOString(),
+  })
+}
+
+// OPTIONS handler for CORS preflight (required for n8n webhook trigger)
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Max-Age": "86400",
+    },
   })
 }
