@@ -1,14 +1,59 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { rateLimit } from "@/lib/security/rate-limit"
+import { addSecurityHeaders } from "@/lib/security/headers"
+import { isValidNumeroOS, isValidStatus } from "@/lib/security/input-validation"
+
+// Rate limiter: 30 requisições por minuto
+const notifyRateLimiter = rateLimit({
+  maxRequests: 30,
+  windowSeconds: 60,
+})
 
 export async function POST(request: NextRequest) {
   try {
+    // Rate limiting
+    const rateLimitResult = notifyRateLimiter(request)
+    if (!rateLimitResult.allowed) {
+      return addSecurityHeaders(
+        NextResponse.json(
+          {
+            success: false,
+            error: "Too many requests",
+            retryAfter: Math.ceil((rateLimitResult.resetAt - Date.now()) / 1000),
+          },
+          { status: 429 }
+        )
+      )
+    }
+
     const body = await request.json()
     const { numero_os, status_anterior, status_novo } = body
 
+    // Validação
     if (!numero_os || !status_novo) {
-      return NextResponse.json(
-        { success: false, error: "Missing required fields" },
-        { status: 400 }
+      return addSecurityHeaders(
+        NextResponse.json(
+          { success: false, error: "Missing required fields" },
+          { status: 400 }
+        )
+      )
+    }
+    
+    if (!isValidNumeroOS(numero_os)) {
+      return addSecurityHeaders(
+        NextResponse.json(
+          { success: false, error: "Invalid numero_os" },
+          { status: 400 }
+        )
+      )
+    }
+    
+    if (!isValidStatus(status_novo)) {
+      return addSecurityHeaders(
+        NextResponse.json(
+          { success: false, error: "Invalid status" },
+          { status: 400 }
+        )
       )
     }
 
@@ -38,9 +83,11 @@ export async function POST(request: NextRequest) {
 
     if (!webhookSecret) {
       console.error("[NOTIFY] WEBHOOK_SECRET not configured")
-      return NextResponse.json(
-        { success: false, error: "Webhook not configured" },
-        { status: 500 }
+      return addSecurityHeaders(
+        NextResponse.json(
+          { success: false, error: "Webhook not configured" },
+          { status: 500 }
+        )
       )
     }
 
@@ -94,26 +141,31 @@ export async function POST(request: NextRequest) {
     if (!webhookResponse.ok) {
       console.error("[NOTIFY] Webhook call failed:", {
         status: webhookResponse.status,
-        responseData,
       })
-      return NextResponse.json(
-        { success: false, error: "Webhook call failed", details: responseData },
-        { status: webhookResponse.status }
+      return addSecurityHeaders(
+        NextResponse.json(
+          { success: false, error: "Webhook call failed", details: responseData },
+          { status: webhookResponse.status }
+        )
       )
     }
 
-    console.log("[NOTIFY] Webhook notified successfully:", responseData)
+    console.log("[NOTIFY] Webhook notified successfully for OS:", numero_os)
 
-    return NextResponse.json({
-      success: true,
-      message: "Webhook notified",
-      data: responseData,
-    })
+    return addSecurityHeaders(
+      NextResponse.json({
+        success: true,
+        message: "Webhook notified",
+        data: responseData,
+      })
+    )
   } catch (error) {
-    console.error("[NOTIFY] Error:", error)
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+    console.error("[NOTIFY] Error:", error instanceof Error ? error.message : "Unknown error")
+    return addSecurityHeaders(
+      NextResponse.json(
+        { success: false, error: error instanceof Error ? error.message : "Unknown error" },
+        { status: 500 }
+      )
     )
   }
 }

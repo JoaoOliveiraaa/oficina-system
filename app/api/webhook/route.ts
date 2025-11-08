@@ -1,6 +1,16 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import type { StatusOS } from "@/lib/types/database"
 import { type NextRequest, NextResponse } from "next/server"
+import { rateLimit } from "@/lib/security/rate-limit"
+import { createSecureWebhookResponse, maskSensitiveData } from "@/lib/security/headers"
+import {
+  validateCriarOSPayload,
+  isValidStatus,
+  isValidNumeroOS,
+  isValidUrl,
+  sanitizeString,
+} from "@/lib/security/input-validation"
+import { isRequestAllowed, logWhitelistCheck } from "@/lib/security/origin-whitelist"
 
 // Webhook payload types
 interface CriarOSPayload {
@@ -44,17 +54,22 @@ interface ConsultarOSPayload {
 
 type WebhookPayload = CriarOSPayload | AtualizarStatusPayload | RegistrarFotoPayload | ConsultarOSPayload
 
+// Rate limiter: 60 requisições por minuto por IP
+const webhookRateLimiter = rateLimit({
+  maxRequests: 60,
+  windowSeconds: 60,
+})
+
 // Helper function to validate authorization
 function validateAuthorization(request: NextRequest): boolean {
   const authHeader = request.headers.get("authorization") || request.headers.get("Authorization")
   const webhookSecret = process.env.WEBHOOK_SECRET
 
+  // Log seguro - não expõe tokens completos
   console.log(`[WEBHOOK] Validating authorization:`, {
     hasAuthHeader: !!authHeader,
-    authHeaderValue: authHeader ? `${authHeader.substring(0, 30)}...` : null,
-    authHeaderFull: authHeader, // Log completo para debug
     hasWebhookSecret: !!webhookSecret,
-    webhookSecretLength: webhookSecret?.length || 0,
+    authHeaderLength: authHeader?.length || 0,
   })
 
   if (!webhookSecret) {
@@ -68,7 +83,6 @@ function validateAuthorization(request: NextRequest): boolean {
   }
 
   // Aceita tanto "Bearer TOKEN" quanto apenas "TOKEN"
-  // Remove espaços extras e normaliza
   let token: string
   if (authHeader.toLowerCase().startsWith("bearer ")) {
     token = authHeader.substring(7).trim()
@@ -76,26 +90,33 @@ function validateAuthorization(request: NextRequest): boolean {
     token = authHeader.trim()
   }
 
-  // Remove espaços extras e compara
+  // Compara usando timing-safe comparison para prevenir timing attacks
   const normalizedToken = token.replace(/\s+/g, " ").trim()
   const normalizedSecret = webhookSecret.trim()
   
-  const isValid = normalizedToken === normalizedSecret
+  // Timing-safe comparison
+  const isValid = timingSafeEqual(normalizedToken, normalizedSecret)
   
   console.log(`[WEBHOOK] Token validation:`, {
-    tokenReceived: `${token.substring(0, 10)}...`,
     tokenLength: token.length,
-    normalizedTokenLength: normalizedToken.length,
-    secretLength: webhookSecret.length,
-    normalizedSecretLength: normalizedSecret.length,
     isValid,
-    tokensMatchExact: token === webhookSecret,
-    normalizedTokensMatch: normalizedToken === normalizedSecret,
-    tokenFirstChars: token.substring(0, 20),
-    secretFirstChars: webhookSecret.substring(0, 20),
   })
   
   return isValid
+}
+
+// Timing-safe string comparison to prevent timing attacks
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) {
+    return false
+  }
+  
+  let result = 0
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  }
+  
+  return result === 0
 }
 
 // Helper function to log webhook calls
@@ -387,104 +408,155 @@ async function consultarOS(supabase: ReturnType<typeof createAdminClient>, paylo
 
 // Main POST handler
 export async function POST(request: NextRequest) {
-  // Log ANTES de qualquer coisa para garantir que capturamos todas as requisições
-  console.log(`[WEBHOOK] ========== POST REQUEST RECEIVED ==========`)
-  console.log(`[WEBHOOK] Timestamp:`, new Date().toISOString())
+  const startTime = Date.now()
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || 
+             request.headers.get("x-real-ip") || 
+             "unknown"
   
-  const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
-  const method = request.method
-  const url = request.url
-
-  // Log all incoming requests for debugging
-  console.log(`[WEBHOOK] ${method} request received from ${ip}`, {
-    url,
-    allHeaders: Object.fromEntries(request.headers.entries()),
-    authorizationHeader: request.headers.get("authorization") || request.headers.get("Authorization") || "NOT FOUND",
+  // Log seguro - sem expor headers completos
+  console.log(`[WEBHOOK] POST request received`, {
+    timestamp: new Date().toISOString(),
+    ip,
+    userAgent: request.headers.get("user-agent")?.substring(0, 50),
   })
 
-  // Validate authorization
-  if (!validateAuthorization(request)) {
-    console.log(`[WEBHOOK] Authorization failed for ${ip}`)
-    return NextResponse.json(
-      { success: false, error: "Unauthorized" },
+  // Rate limiting - 60 requisições por minuto
+  const rateLimitResult = webhookRateLimiter(request)
+  if (!rateLimitResult.allowed) {
+    console.warn(`[WEBHOOK] Rate limit exceeded for IP ${ip}`)
+    return createSecureWebhookResponse(
       {
-        status: 401,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        },
+        success: false,
+        error: "Too many requests. Please try again later.",
+        retryAfter: Math.ceil((rateLimitResult.resetAt - Date.now()) / 1000),
       },
+      429,
+    )
+  }
+
+  // Validate authorization
+  const isAuthValid = validateAuthorization(request)
+  if (!isAuthValid) {
+    console.warn(`[WEBHOOK] Authorization failed for ${ip}`)
+    return createSecureWebhookResponse(
+      { success: false, error: "Unauthorized" },
+      401,
     )
   }
 
   console.log(`[WEBHOOK] Authorization successful for ${ip}`)
 
+  // Whitelist validation (opcional - adiciona camada extra de segurança)
+  // Com autenticação válida, whitelist é opcional mas recomendado
+  const origin = request.headers.get("origin") || request.headers.get("referer")
+  const userAgent = request.headers.get("user-agent")
+  
+  const whitelistCheck = isRequestAllowed(origin, ip, userAgent, true) // true = bypass com auth válida
+  logWhitelistCheck(origin, ip, userAgent, whitelistCheck)
+  
+  // Se quiser forçar whitelist mesmo com auth, descomente:
+  // if (!whitelistCheck.allowed) {
+  //   console.warn(`[WEBHOOK] Whitelist check failed:`, whitelistCheck.reason)
+  //   return createSecureWebhookResponse(
+  //     { success: false, error: "Origin not allowed" },
+  //     403,
+  //   )
+  // }
+
   let payload: WebhookPayload
 
   try {
-    payload = await request.json()
-    console.log(`[WEBHOOK] Payload received:`, JSON.stringify(payload, null, 2))
-  } catch (error) {
-    console.error(`[WEBHOOK] Failed to parse JSON:`, error)
-    return NextResponse.json(
-      { success: false, error: "Invalid JSON payload" },
-      {
-        status: 400,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        },
-      },
-    )
-  }
-
-  if (!payload.acao) {
-    return NextResponse.json(
-      { success: false, error: "Campo 'acao' é obrigatório" },
-      {
-        status: 400,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        },
-      },
-    )
-  }
-
-  if (payload.acao === "criar_os") {
-    if (!payload.cliente?.nome || !payload.cliente?.telefone) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Campos 'cliente.nome' e 'cliente.telefone' são obrigatórios",
-        },
-        {
-          status: 400,
-          headers: {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
-          },
-        },
+    const rawPayload = await request.json()
+    
+    // Limita tamanho do payload
+    const payloadSize = JSON.stringify(rawPayload).length
+    if (payloadSize > 100000) { // 100KB
+      console.warn(`[WEBHOOK] Payload too large: ${payloadSize} bytes from ${ip}`)
+      return createSecureWebhookResponse(
+        { success: false, error: "Payload too large" },
+        413,
       )
     }
-    if (!payload.procedimento?.descricao) {
-      return NextResponse.json(
+    
+    payload = rawPayload
+    
+    // Log seguro - mascara dados sensíveis
+    console.log(`[WEBHOOK] Payload received:`, {
+      acao: payload.acao,
+      payloadSize,
+      hasCliente: 'cliente' in payload,
+      hasProcedimento: 'procedimento' in payload,
+    })
+  } catch (error) {
+    console.error(`[WEBHOOK] Failed to parse JSON from ${ip}:`, error instanceof Error ? error.message : "Unknown error")
+    return createSecureWebhookResponse(
+      { success: false, error: "Invalid JSON payload" },
+      400,
+    )
+  }
+
+  // Valida ação
+  if (!payload.acao) {
+    return createSecureWebhookResponse(
+      { success: false, error: "Campo 'acao' é obrigatório" },
+      400,
+    )
+  }
+  
+  const validActions = ["criar_os", "atualizar_status", "registrar_foto", "consultar_os"]
+  if (!validActions.includes(payload.acao)) {
+    console.warn(`[WEBHOOK] Invalid action: ${payload.acao} from ${ip}`)
+    return createSecureWebhookResponse(
+      { success: false, error: "Ação não reconhecida" },
+      400,
+    )
+  }
+
+  // Validação específica por ação
+  if (payload.acao === "criar_os") {
+    const validation = validateCriarOSPayload(payload)
+    if (!validation.valid) {
+      console.warn(`[WEBHOOK] Validation failed for criar_os:`, validation.errors)
+      return createSecureWebhookResponse(
         {
           success: false,
-          error: "Campo 'procedimento.descricao' é obrigatório",
+          error: "Dados inválidos",
+          details: validation.errors,
         },
-        {
-          status: 400,
-          headers: {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
-          },
-        },
+        400,
+      )
+    }
+  } else if (payload.acao === "atualizar_status") {
+    if (!isValidNumeroOS(payload.numero_os)) {
+      return createSecureWebhookResponse(
+        { success: false, error: "Número de OS inválido" },
+        400,
+      )
+    }
+    if (!isValidStatus(payload.status)) {
+      return createSecureWebhookResponse(
+        { success: false, error: "Status inválido" },
+        400,
+      )
+    }
+  } else if (payload.acao === "registrar_foto") {
+    if (!isValidNumeroOS(payload.numero_os)) {
+      return createSecureWebhookResponse(
+        { success: false, error: "Número de OS inválido" },
+        400,
+      )
+    }
+    if (!isValidUrl(payload.foto_url)) {
+      return createSecureWebhookResponse(
+        { success: false, error: "URL da foto inválida" },
+        400,
+      )
+    }
+  } else if (payload.acao === "consultar_os") {
+    if (!isValidNumeroOS(payload.numero_os)) {
+      return createSecureWebhookResponse(
+        { success: false, error: "Número de OS inválido" },
+        400,
       )
     }
   }
@@ -513,23 +585,23 @@ export async function POST(request: NextRequest) {
 
       default:
         await logWebhook(supabase, "unknown", payload, "erro", "Ação não reconhecida", ip)
-        return NextResponse.json(
+        return createSecureWebhookResponse(
           { success: false, error: "Ação não reconhecida" },
-          {
-            status: 400,
-            headers: {
-              "Access-Control-Allow-Origin": "*",
-              "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-              "Access-Control-Allow-Headers": "Content-Type, Authorization",
-            },
-          },
+          400,
         )
     }
 
-    // Log success
-    console.log(`[WEBHOOK] Processing action: ${payload.acao}`)
-    await logWebhook(supabase, payload.acao, payload, "sucesso", undefined, ip)
-    console.log(`[WEBHOOK] Action ${payload.acao} completed successfully`)
+    const processingTime = Date.now() - startTime
+
+    // Log success com informações de auditoria
+    console.log(`[WEBHOOK] Action completed:`, {
+      acao: payload.acao,
+      processingTime: `${processingTime}ms`,
+      ip,
+      success: true,
+    })
+    
+    await logWebhook(supabase, payload.acao, maskSensitiveData(payload), "sucesso", undefined, ip)
 
     const n8nResponse = await relayToN8n({
       ...payload,
@@ -537,113 +609,90 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     })
 
-    console.log(`[WEBHOOK] n8n relay response:`, n8nResponse)
+    console.log(`[WEBHOOK] n8n relay:`, {
+      success: n8nResponse.success,
+      status: n8nResponse.status,
+    })
 
-    return NextResponse.json(
-      {
-        ...result,
-        n8n: {
-          enviado: n8nResponse.success,
-          status: n8nResponse.status,
-          erro: n8nResponse.error,
-        },
+    return createSecureWebhookResponse({
+      ...result,
+      n8n: {
+        enviado: n8nResponse.success,
+        status: n8nResponse.status,
+        erro: n8nResponse.error,
       },
-      {
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        },
-      },
-    )
+    })
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Erro desconhecido"
+    const processingTime = Date.now() - startTime
 
-    console.error(`[WEBHOOK] Error processing request:`, error)
-    console.error(`[WEBHOOK] Error stack:`, error instanceof Error ? error.stack : "No stack trace")
+    console.error(`[WEBHOOK] Error processing request:`, {
+      error: errorMessage,
+      acao: payload?.acao || "unknown",
+      processingTime: `${processingTime}ms`,
+      ip,
+    })
+    
+    if (error instanceof Error && error.stack) {
+      console.error(`[WEBHOOK] Stack trace:`, error.stack.split('\n').slice(0, 5).join('\n'))
+    }
 
     // Log error
     try {
-      await logWebhook(supabase, payload?.acao || "unknown", payload, "erro", errorMessage, ip)
+      await logWebhook(
+        supabase, 
+        payload?.acao || "unknown", 
+        payload ? maskSensitiveData(payload) : {}, 
+        "erro", 
+        errorMessage, 
+        ip
+      )
     } catch (logError) {
-      console.error(`[WEBHOOK] Failed to log error:`, logError)
+      console.error(`[WEBHOOK] Failed to log error:`, logError instanceof Error ? logError.message : "Unknown error")
     }
 
     try {
       await relayToN8n({
-        ...payload,
+        acao: payload?.acao || "error",
         erro: errorMessage,
         timestamp: new Date().toISOString(),
       })
     } catch (relayError) {
-      console.error(`[WEBHOOK] Failed to relay error to n8n:`, relayError)
+      console.error(`[WEBHOOK] Failed to relay error to n8n:`, relayError instanceof Error ? relayError.message : "Unknown error")
     }
 
-    return NextResponse.json(
+    return createSecureWebhookResponse(
       { success: false, error: errorMessage },
-      {
-        status: 500,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        },
-      },
+      500,
     )
   }
 }
 
 // GET handler for health check
 export async function GET(request: NextRequest) {
-  // Log ANTES de qualquer coisa
-  console.log(`[WEBHOOK] ========== GET REQUEST RECEIVED ==========`)
-  console.log(`[WEBHOOK] Timestamp:`, new Date().toISOString())
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || 
+             request.headers.get("x-real-ip") || 
+             "unknown"
   
-  const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
-  
-  console.log(`[WEBHOOK] GET request received from ${ip}`, {
-    url: request.url,
-    headers: Object.fromEntries(request.headers.entries()),
-  })
+  console.log(`[WEBHOOK] Health check from ${ip}`)
 
-  return NextResponse.json(
-    {
-      status: "ok",
-      message: "Webhook API is running",
-      timestamp: new Date().toISOString(),
-      endpoint: "/api/webhook",
-      methods: ["GET", "POST", "OPTIONS"],
-    },
-    {
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      },
-    },
-  )
+  return createSecureWebhookResponse({
+    status: "ok",
+    message: "Webhook API is running",
+    timestamp: new Date().toISOString(),
+    endpoint: "/api/webhook",
+    methods: ["GET", "POST", "OPTIONS"],
+    version: "2.0",
+  })
 }
 
 // OPTIONS handler for CORS preflight (required for n8n webhook trigger)
 export async function OPTIONS(request: NextRequest) {
-  // Log ANTES de qualquer coisa
-  console.log(`[WEBHOOK] ========== OPTIONS REQUEST RECEIVED ==========`)
-  console.log(`[WEBHOOK] Timestamp:`, new Date().toISOString())
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || 
+             request.headers.get("x-real-ip") || 
+             "unknown"
   
-  const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
-  
-  console.log(`[WEBHOOK] OPTIONS request received from ${ip}`, {
-    url: request.url,
-    headers: Object.fromEntries(request.headers.entries()),
-  })
+  console.log(`[WEBHOOK] OPTIONS (CORS preflight) from ${ip}`)
 
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      "Access-Control-Max-Age": "86400",
-    },
-  })
+  return createSecureWebhookResponse(null, 204)
 }
