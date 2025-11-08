@@ -195,9 +195,14 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
         const { error: osError } = await supabase
           .from("ordens_servico")
           .update({
-            ...formData,
+            cliente_id: formData.cliente_id,
+            veiculo_id: formData.veiculo_id || null,
+            descricao: formData.descricao,
+            status: formData.status,
+            data_entrada: formData.data_entrada,
             data_prevista: formData.data_prevista || null,
             data_conclusao: formData.data_conclusao || null,
+            observacoes: formData.observacoes || null,
             valor_total: valorTotal,
           })
           .eq("id", ordem.id)
@@ -251,8 +256,14 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
           .from("ordens_servico")
           .insert([
             {
-              ...formData,
+              cliente_id: formData.cliente_id,
+              veiculo_id: formData.veiculo_id || null,
+              descricao: formData.descricao,
+              status: formData.status,
+              data_entrada: formData.data_entrada,
               data_prevista: formData.data_prevista || null,
+              data_conclusao: null, // Sempre null ao criar
+              observacoes: formData.observacoes || null,
               valor_total: valorTotal,
             },
           ])
@@ -355,7 +366,7 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
         />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className={`grid gap-4 ${ordem ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
         <div className="space-y-2">
           <Label htmlFor="status">Status</Label>
           <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
@@ -396,17 +407,19 @@ export function OrderForm({ ordem, clientes, veiculos }: { ordem?: any; clientes
           />
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="data_conclusao">Data de Conclusão</Label>
-          <Input
-            id="data_conclusao"
-            type="date"
-            value={formData.data_conclusao}
-            onChange={(e) => setFormData({ ...formData, data_conclusao: e.target.value })}
-            min={new Date().toISOString().split("T")[0]}
-            disabled={loading}
-          />
-        </div>
+        {/* Data de Conclusão só aparece ao editar uma OS existente */}
+        {ordem && (
+          <div className="space-y-2">
+            <Label htmlFor="data_conclusao">Data de Conclusão</Label>
+            <Input
+              id="data_conclusao"
+              type="date"
+              value={formData.data_conclusao}
+              onChange={(e) => setFormData({ ...formData, data_conclusao: e.target.value })}
+              disabled={loading}
+            />
+          </div>
+        )}
       </div>
 
       <Card>
