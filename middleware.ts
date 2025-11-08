@@ -1,42 +1,21 @@
-import { NextResponse, type NextRequest } from "next/server"
+import { type NextRequest } from "next/server"
 import { updateSession } from "@/lib/supabase/middleware"
 
+const SECURITY_HEADERS = {
+  "X-Frame-Options": "DENY",
+  "X-Content-Type-Options": "nosniff",
+  "X-XSS-Protection": "1; mode=block",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+  "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https://*.supabase.co; frame-ancestors 'none';"
+}
+
 export async function middleware(request: NextRequest) {
-  // Adiciona headers de segurança em todas as respostas
   const response = await updateSession(request)
-  
-  // Headers de segurança
-  response.headers.set("X-Frame-Options", "DENY")
-  response.headers.set("X-Content-Type-Options", "nosniff")
-  response.headers.set("X-XSS-Protection", "1; mode=block")
-  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin")
-  response.headers.set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-  
-  // CSP (Content Security Policy) - ajuste conforme necessário
-  const cspHeader = `
-    default-src 'self';
-    script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.jsdelivr.net;
-    style-src 'self' 'unsafe-inline';
-    img-src 'self' data: https: blob:;
-    font-src 'self' data:;
-    connect-src 'self' https://*.supabase.co;
-    frame-ancestors 'none';
-  `.replace(/\n/g, "").replace(/\s{2,}/g, " ").trim()
-  
-  response.headers.set("Content-Security-Policy", cspHeader)
-  
+  Object.entries(SECURITY_HEADERS).forEach(([key, value]) => response.headers.set(key, value))
   return response
 }
 
 export const config = {
-  matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public folder
-     */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
-  ],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
 }

@@ -10,7 +10,7 @@ import {
   isValidUrl,
   sanitizeString,
 } from "@/lib/security/input-validation"
-import { isRequestAllowed, logWhitelistCheck } from "@/lib/security/origin-whitelist"
+import { isRequestAllowed } from "@/lib/security/origin-whitelist"
 
 // Webhook payload types
 interface CriarOSPayload {
@@ -60,62 +60,25 @@ const webhookRateLimiter = rateLimit({
   windowSeconds: 60,
 })
 
-// Helper function to validate authorization
 function validateAuthorization(request: NextRequest): boolean {
   const authHeader = request.headers.get("authorization") || request.headers.get("Authorization")
   const webhookSecret = process.env.WEBHOOK_SECRET
 
-  // Log seguro - não expõe tokens completos
-  console.log(`[WEBHOOK] Validating authorization:`, {
-    hasAuthHeader: !!authHeader,
-    hasWebhookSecret: !!webhookSecret,
-    authHeaderLength: authHeader?.length || 0,
-  })
+  if (!webhookSecret || !authHeader) return false
 
-  if (!webhookSecret) {
-    console.error("[WEBHOOK] WEBHOOK_SECRET not configured")
-    return false
-  }
+  const token = authHeader.toLowerCase().startsWith("bearer ") 
+    ? authHeader.substring(7).trim() 
+    : authHeader.trim()
 
-  if (!authHeader) {
-    console.log("[WEBHOOK] No Authorization header found")
-    return false
-  }
-
-  // Aceita tanto "Bearer TOKEN" quanto apenas "TOKEN"
-  let token: string
-  if (authHeader.toLowerCase().startsWith("bearer ")) {
-    token = authHeader.substring(7).trim()
-  } else {
-    token = authHeader.trim()
-  }
-
-  // Compara usando timing-safe comparison para prevenir timing attacks
-  const normalizedToken = token.replace(/\s+/g, " ").trim()
-  const normalizedSecret = webhookSecret.trim()
-  
-  // Timing-safe comparison
-  const isValid = timingSafeEqual(normalizedToken, normalizedSecret)
-  
-  console.log(`[WEBHOOK] Token validation:`, {
-    tokenLength: token.length,
-    isValid,
-  })
-  
-  return isValid
+  return timingSafeEqual(token.replace(/\s+/g, " ").trim(), webhookSecret.trim())
 }
 
-// Timing-safe string comparison to prevent timing attacks
 function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    return false
-  }
-  
+  if (a.length !== b.length) return false
   let result = 0
   for (let i = 0; i < a.length; i++) {
     result |= a.charCodeAt(i) ^ b.charCodeAt(i)
   }
-  
   return result === 0
 }
 
@@ -406,158 +369,76 @@ async function consultarOS(supabase: ReturnType<typeof createAdminClient>, paylo
   }
 }
 
-// Main POST handler
 export async function POST(request: NextRequest) {
   const startTime = Date.now()
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || 
-             request.headers.get("x-real-ip") || 
-             "unknown"
-  
-  // Log seguro - sem expor headers completos
-  console.log(`[WEBHOOK] POST request received`, {
-    timestamp: new Date().toISOString(),
-    ip,
-    userAgent: request.headers.get("user-agent")?.substring(0, 50),
-  })
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown"
 
-  // Rate limiting - 60 requisições por minuto
+  // Rate limiting
   const rateLimitResult = webhookRateLimiter(request)
   if (!rateLimitResult.allowed) {
-    console.warn(`[WEBHOOK] Rate limit exceeded for IP ${ip}`)
     return createSecureWebhookResponse(
       {
         success: false,
-        error: "Too many requests. Please try again later.",
+        error: "Too many requests",
         retryAfter: Math.ceil((rateLimitResult.resetAt - Date.now()) / 1000),
       },
       429,
     )
   }
 
-  // Validate authorization
-  const isAuthValid = validateAuthorization(request)
-  if (!isAuthValid) {
-    console.warn(`[WEBHOOK] Authorization failed for ${ip}`)
-    return createSecureWebhookResponse(
-      { success: false, error: "Unauthorized" },
-      401,
-    )
+  // Authorization
+  if (!validateAuthorization(request)) {
+    console.warn(`[WEBHOOK] Auth failed: ${ip}`)
+    return createSecureWebhookResponse({ success: false, error: "Unauthorized" }, 401)
   }
 
-  console.log(`[WEBHOOK] Authorization successful for ${ip}`)
-
-  // Whitelist validation (opcional - adiciona camada extra de segurança)
-  // Com autenticação válida, whitelist é opcional mas recomendado
+  // Whitelist check (logging only)
   const origin = request.headers.get("origin") || request.headers.get("referer")
-  const userAgent = request.headers.get("user-agent")
-  
-  const whitelistCheck = isRequestAllowed(origin, ip, userAgent, true) // true = bypass com auth válida
-  logWhitelistCheck(origin, ip, userAgent, whitelistCheck)
-  
-  // Se quiser forçar whitelist mesmo com auth, descomente:
-  // if (!whitelistCheck.allowed) {
-  //   console.warn(`[WEBHOOK] Whitelist check failed:`, whitelistCheck.reason)
-  //   return createSecureWebhookResponse(
-  //     { success: false, error: "Origin not allowed" },
-  //     403,
-  //   )
-  // }
+  const whitelistCheck = isRequestAllowed(origin, ip, request.headers.get("user-agent"), true)
+  if (!whitelistCheck.allowed) {
+    console.warn(`[WEBHOOK] Non-whitelisted origin: ${origin}`)
+  }
 
   let payload: WebhookPayload
 
   try {
     const rawPayload = await request.json()
-    
-    // Limita tamanho do payload
     const payloadSize = JSON.stringify(rawPayload).length
-    if (payloadSize > 100000) { // 100KB
-      console.warn(`[WEBHOOK] Payload too large: ${payloadSize} bytes from ${ip}`)
-      return createSecureWebhookResponse(
-        { success: false, error: "Payload too large" },
-        413,
-      )
+    
+    if (payloadSize > 100000) {
+      return createSecureWebhookResponse({ success: false, error: "Payload too large" }, 413)
     }
     
     payload = rawPayload
-    
-    // Log seguro - mascara dados sensíveis
-    console.log(`[WEBHOOK] Payload received:`, {
-      acao: payload.acao,
-      payloadSize,
-      hasCliente: 'cliente' in payload,
-      hasProcedimento: 'procedimento' in payload,
-    })
-  } catch (error) {
-    console.error(`[WEBHOOK] Failed to parse JSON from ${ip}:`, error instanceof Error ? error.message : "Unknown error")
-    return createSecureWebhookResponse(
-      { success: false, error: "Invalid JSON payload" },
-      400,
-    )
+  } catch {
+    return createSecureWebhookResponse({ success: false, error: "Invalid JSON" }, 400)
   }
 
-  // Valida ação
-  if (!payload.acao) {
-    return createSecureWebhookResponse(
-      { success: false, error: "Campo 'acao' é obrigatório" },
-      400,
-    )
-  }
-  
   const validActions = ["criar_os", "atualizar_status", "registrar_foto", "consultar_os"]
-  if (!validActions.includes(payload.acao)) {
-    console.warn(`[WEBHOOK] Invalid action: ${payload.acao} from ${ip}`)
-    return createSecureWebhookResponse(
-      { success: false, error: "Ação não reconhecida" },
-      400,
-    )
+  if (!payload.acao || !validActions.includes(payload.acao)) {
+    return createSecureWebhookResponse({ success: false, error: "Invalid action" }, 400)
   }
 
-  // Validação específica por ação
+  // Validação por ação
   if (payload.acao === "criar_os") {
     const validation = validateCriarOSPayload(payload)
     if (!validation.valid) {
-      console.warn(`[WEBHOOK] Validation failed for criar_os:`, validation.errors)
       return createSecureWebhookResponse(
-        {
-          success: false,
-          error: "Dados inválidos",
-          details: validation.errors,
-        },
+        { success: false, error: "Invalid data", details: validation.errors },
         400,
       )
     }
   } else if (payload.acao === "atualizar_status") {
-    if (!isValidNumeroOS(payload.numero_os)) {
-      return createSecureWebhookResponse(
-        { success: false, error: "Número de OS inválido" },
-        400,
-      )
-    }
-    if (!isValidStatus(payload.status)) {
-      return createSecureWebhookResponse(
-        { success: false, error: "Status inválido" },
-        400,
-      )
+    if (!isValidNumeroOS(payload.numero_os) || !isValidStatus(payload.status)) {
+      return createSecureWebhookResponse({ success: false, error: "Invalid OS or status" }, 400)
     }
   } else if (payload.acao === "registrar_foto") {
-    if (!isValidNumeroOS(payload.numero_os)) {
-      return createSecureWebhookResponse(
-        { success: false, error: "Número de OS inválido" },
-        400,
-      )
-    }
-    if (!isValidUrl(payload.foto_url)) {
-      return createSecureWebhookResponse(
-        { success: false, error: "URL da foto inválida" },
-        400,
-      )
+    if (!isValidNumeroOS(payload.numero_os) || !isValidUrl(payload.foto_url)) {
+      return createSecureWebhookResponse({ success: false, error: "Invalid OS or URL" }, 400)
     }
   } else if (payload.acao === "consultar_os") {
     if (!isValidNumeroOS(payload.numero_os)) {
-      return createSecureWebhookResponse(
-        { success: false, error: "Número de OS inválido" },
-        400,
-      )
+      return createSecureWebhookResponse({ success: false, error: "Invalid OS number" }, 400)
     }
   }
 
@@ -592,14 +473,6 @@ export async function POST(request: NextRequest) {
     }
 
     const processingTime = Date.now() - startTime
-
-    // Log success com informações de auditoria
-    console.log(`[WEBHOOK] Action completed:`, {
-      acao: payload.acao,
-      processingTime: `${processingTime}ms`,
-      ip,
-      success: true,
-    })
     
     await logWebhook(supabase, payload.acao, maskSensitiveData(payload), "sucesso", undefined, ip)
 
@@ -609,10 +482,7 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     })
 
-    console.log(`[WEBHOOK] n8n relay:`, {
-      success: n8nResponse.success,
-      status: n8nResponse.status,
-    })
+    console.log(`[WEBHOOK] ✓ ${payload.acao} (${processingTime}ms)`)
 
     return createSecureWebhookResponse({
       ...result,
@@ -623,76 +493,26 @@ export async function POST(request: NextRequest) {
       },
     })
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Erro desconhecido"
-    const processingTime = Date.now() - startTime
-
-    console.error(`[WEBHOOK] Error processing request:`, {
-      error: errorMessage,
-      acao: payload?.acao || "unknown",
-      processingTime: `${processingTime}ms`,
-      ip,
-    })
-    
-    if (error instanceof Error && error.stack) {
-      console.error(`[WEBHOOK] Stack trace:`, error.stack.split('\n').slice(0, 5).join('\n'))
-    }
-
-    // Log error
-    try {
-      await logWebhook(
-        supabase, 
-        payload?.acao || "unknown", 
-        payload ? maskSensitiveData(payload) : {}, 
-        "erro", 
-        errorMessage, 
-        ip
-      )
-    } catch (logError) {
-      console.error(`[WEBHOOK] Failed to log error:`, logError instanceof Error ? logError.message : "Unknown error")
-    }
+    const errorMessage = error instanceof Error ? error.message : "Internal error"
+    console.error(`[WEBHOOK] ✗ ${payload?.acao || "unknown"}: ${errorMessage}`)
 
     try {
-      await relayToN8n({
-        acao: payload?.acao || "error",
-        erro: errorMessage,
-        timestamp: new Date().toISOString(),
-      })
-    } catch (relayError) {
-      console.error(`[WEBHOOK] Failed to relay error to n8n:`, relayError instanceof Error ? relayError.message : "Unknown error")
-    }
+      await logWebhook(supabase, payload?.acao || "unknown", payload ? maskSensitiveData(payload) : {}, "erro", errorMessage, ip)
+      await relayToN8n({ acao: payload?.acao || "error", erro: errorMessage, timestamp: new Date().toISOString() })
+    } catch {}
 
-    return createSecureWebhookResponse(
-      { success: false, error: errorMessage },
-      500,
-    )
+    return createSecureWebhookResponse({ success: false, error: errorMessage }, 500)
   }
 }
 
-// GET handler for health check
-export async function GET(request: NextRequest) {
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || 
-             request.headers.get("x-real-ip") || 
-             "unknown"
-  
-  console.log(`[WEBHOOK] Health check from ${ip}`)
-
+export async function GET() {
   return createSecureWebhookResponse({
     status: "ok",
     message: "Webhook API is running",
-    timestamp: new Date().toISOString(),
-    endpoint: "/api/webhook",
-    methods: ["GET", "POST", "OPTIONS"],
     version: "2.0",
   })
 }
 
-// OPTIONS handler for CORS preflight (required for n8n webhook trigger)
-export async function OPTIONS(request: NextRequest) {
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || 
-             request.headers.get("x-real-ip") || 
-             "unknown"
-  
-  console.log(`[WEBHOOK] OPTIONS (CORS preflight) from ${ip}`)
-
+export async function OPTIONS() {
   return createSecureWebhookResponse(null, 204)
 }
