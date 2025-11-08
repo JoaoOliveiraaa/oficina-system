@@ -106,7 +106,7 @@ async function logWebhook(
 
 async function relayToN8n(data: unknown): Promise<{ success: boolean; status: number; error?: string }> {
   const n8nUrl =
-    process.env.N8N_WEBHOOK_URL || "https://defiant-lilly-disfavorably.ngrok-free.dev/webhook-test/receber-oficina"
+    process.env.N8N_WEBHOOK_URL || "https://defiant-lilly-disfavorably.ngrok-free.dev/webhook/receber-oficina"
 
   console.log(`[WEBHOOK] Attempting to relay to n8n:`, {
     url: n8nUrl,
