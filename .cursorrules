@@ -1,0 +1,154 @@
+# Cursor Rules - Sistema de Oficina
+
+## Código Limpo e Performance
+
+1. **Logs Minimais em Produção**
+   - Evite logs verbose desnecessários
+   - Use logs estruturados: `console.log(\`[MODULE] ✓/✗ action (time)\`)`
+   - Não logue dados sensíveis (tokens, CPF, senhas)
+
+2. **Funções Concisas**
+   - Prefira early returns
+   - Máximo 30 linhas por função
+   - Use arrow functions quando apropriado
+
+3. **Comentários Úteis**
+   - Evite comentários óbvios
+   - Documente apenas lógica complexa
+   - Use TypeScript types em vez de comentários
+
+4. **Validação**
+   - Valide no edge (mais cedo possível)
+   - Use funções de validação centralizadas
+   - Retorne erros específicos
+
+## Segurança
+
+1. **SEMPRE:**
+   - Valide entrada de dados
+   - Sanitize strings
+   - Use timing-safe comparison para tokens
+   - Adicione headers de segurança
+   - Mascare dados sensíveis em logs
+
+2. **NUNCA:**
+   - Exponha tokens em logs
+   - Use console.log para dados completos de usuário
+   - Ignore validações "porque confia na entrada"
+
+## Performance
+
+1. **Otimize:**
+   - Use early returns
+   - Minimize logs em produção
+   - Cache quando possível
+   - Evite loops desnecessários
+
+2. **Meça:**
+   - Timing de operações críticas
+   - Taxa de sucesso/erro
+   - Rate limiting effectiveness
+
+## TypeScript
+
+1. **Use tipos explícitos:**
+   ```typescript
+   // Bom
+   function validate(data: CreateOSPayload): ValidationResult
+   
+   // Ruim
+   function validate(data: any): any
+   ```
+
+2. **Interfaces em vez de any:**
+   - Sempre defina interfaces para payloads
+   - Use union types para status
+   - Evite `any` exceto quando necessário
+
+## API Design
+
+1. **Respostas consistentes:**
+   ```typescript
+   { success: true, data: {...} }
+   { success: false, error: "message", details?: [...] }
+   ```
+
+2. **Status codes corretos:**
+   - 200: Success
+   - 400: Bad request / validation
+   - 401: Unauthorized
+   - 403: Forbidden
+   - 429: Rate limit
+   - 500: Server error
+
+3. **Headers sempre:**
+   - Use `createSecureWebhookResponse()` ou `addSecurityHeaders()`
+   - CORS quando necessário
+
+## Módulos de Segurança
+
+Sempre use os módulos centralizados:
+- `lib/security/rate-limit.ts` - Rate limiting
+- `lib/security/input-validation.ts` - Validação
+- `lib/security/headers.ts` - Headers HTTP
+- `lib/security/origin-whitelist.ts` - Whitelist
+
+## Padrões de Código
+
+```typescript
+// ✅ Bom
+export async function POST(request: NextRequest) {
+  const limiter = rateLimit({ maxRequests: 60, windowSeconds: 60 })
+  
+  if (!limiter(request).allowed) {
+    return createSecureWebhookResponse({ error: "Rate limit" }, 429)
+  }
+  
+  if (!validateAuth(request)) {
+    return createSecureWebhookResponse({ error: "Unauthorized" }, 401)
+  }
+  
+  const validation = validatePayload(data)
+  if (!validation.valid) {
+    return createSecureWebhookResponse({ error: "Invalid", details: validation.errors }, 400)
+  }
+  
+  // process...
+  
+  console.log(\`[API] ✓ action (\${time}ms)\`)
+  return createSecureWebhookResponse({ success: true, data })
+}
+
+// ❌ Ruim
+export async function POST(request: NextRequest) {
+  console.log("REQUEST RECEIVED")
+  console.log("Headers:", request.headers)
+  console.log("Body:", await request.json())
+  
+  // sem validação
+  // sem rate limiting
+  // sem headers de segurança
+  
+  return NextResponse.json({ ok: true })
+}
+```
+
+## Commits
+
+Use conventional commits:
+- `feat:` Nova funcionalidade
+- `fix:` Bug fix
+- `perf:` Performance
+- `refactor:` Refatoração
+- `security:` Segurança
+- `docs:` Documentação
+
+## Testing
+
+Sempre teste:
+1. Happy path
+2. Edge cases (invalid data)
+3. Rate limiting
+4. Authentication failures
+5. Large payloads
+
